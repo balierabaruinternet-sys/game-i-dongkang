@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Lompatan Katak</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #e0f7fa;
+      font-family: Arial, sans-serif;
+    }
+    #gameWrapper {
+      text-align: center;
+    }
+    canvas {
+      border: 2px solid #004d40;
+      border-radius: 6px;
+      display: block;
+      margin: 0 auto 10px;
+      background: transparent;
+    }
+    #info {
+      font-size: 14px;
+      color: #004d40;
+      margin-bottom: 10px;
+    }
+    #formInput {
+      margin-bottom: 18px;
+      background: rgba(240,240,240,.9);
+      border-radius: 5px;
+      display: inline-block;
+      padding: 18px 25px 10px 25px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+    #formInput input {
+      margin: 8px 12px;
+      padding: 6px 12px;
+      border-radius: 3px;
+      border: 1px solid #bbb;
+      font-size: 14px;
+      outline: none;
+    }
+    #formInput button {
+      padding: 7px 19px;
+      font-size: 15px;
+      border-radius: 5px;
+      border: none;
+      background: #00897b;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 7px;
+    }
+  </style>
+</head>
+<body>
+<div id="gameWrapper">
+  <div id="formInput">
+    <div><b>Silakan isi data Anda sebelum main:</b></div>
+    <input type="text" id="nama" placeholder="Nama" required />
+    <input type="text" id="custid" placeholder="Customer ID" required />
+    <br>
+    <button id="btnStart">Mulai Main</button>
+  </div>
+  
+  <canvas id="game" width="600" height="300" style="display:none"></canvas>
+  <div id="info" style="display:none">
+    Kontrol: ← → untuk gerak, Spasi untuk lompat. Ambil serangga kecil, hindari tetesan air.<br>
+    Maksimal skor: 1000
+  </div>
+</div>
+
+<script>
+  // Form interaksi
+  const formInput = document.getElementById('formInput');
+  const btnStart = document.getElementById('btnStart');
+  const inputNama = document.getElementById('nama');
+  const inputCustId = document.getElementById('custid');
+  const gameCanvas = document.getElementById('game');
+  const gameInfo = document.getElementById('info');
+  let playerNama = "";
+  let playerCustId = "";
+
+  btnStart.onclick = () => {
+    playerNama = inputNama.value.trim();
+    playerCustId = inputCustId.value.trim();
+    if (!playerNama || !playerCustId) {
+      alert("Nama dan Customer ID wajib diisi!");
+      return;
+    }
+    formInput.style.display = "none";
+    gameCanvas.style.display = "block";
+    gameInfo.style.display = "block";
+    animate();
+  };
+
+  const canvas = gameCanvas;
+  const ctx = canvas.getContext('2d');
+  const bgImage = new Image();
+  bgImage.src = "1000123344.jpg";
+
+  const groundY = 250;
+
+  const frog = {
+    x: 80,
+    y: groundY,
+    w: 55,
+    h: 30,
+    colorBody: '#2e7d32',
+    colorDark: '#1b5e20',
+    vy: 0,
+    speed: 4,
+    onGround: true,
+    // lidah
+    tongueTimer: 0,
+    tongueTarget: { x: 0, y: 0 }
+  };
+
+  const gravity = 0.5;
+  const jumpPower = -9;
+
+  let keys = {};
+  let foods = [];
+  let enemies = [];
+  let score = 0;
+  let gameOver = false;
+  let gameClear = false;
+
+  let fireworks = [];
+  let fireworkTicker = 0;
+  function addFirework() {
+    const particles = [];
+    const x = Math.random() * (canvas.width - 80) + 40;
+    const y = Math.random() * 60 + 80;
+    const colorList = ['#ff5252','#ffd600','#2979ff','#69f0ae','#e040fb','#ffab91'];
+    for(let i=0;i<32;i++) {
+      const angle = (Math.PI*2) * i/32;
+      particles.push({
+        x: x,
+        y: y,
+        r: 3 + Math.random()*2,
+        vx: Math.cos(angle) * (2+Math.random()*4),
+        vy: Math.sin(angle) * (2+Math.random()*4),
+        alpha: 1,
+        color: colorList[Math.floor(Math.random()*colorList.length)]
+      });
+    }
+    fireworks.push(particles);
+  }
+
+  window.addEventListener('keydown', (e) => {
+    keys[e.code] = true;
+    if (e.code === 'Space' && frog.onGround && !gameOver && !gameClear) {
+      frog.vy = jumpPower;
+      frog.onGround = false;
+    }
+    if (e.code === 'Enter' && (gameOver || gameClear)) {
+      resetGame();
+    }
+  });
+  window.addEventListener('keyup', (e) => {
+    keys[e.code] = false;
+  });
+
+  function resetGame() {
+    score = 0;
+    frog.x = 80;
+    frog.y = groundY;
+    frog.vy = 0;
+    frog.onGround = true;
+    frog.tongueTimer = 0;
+    foods = [];
+    enemies = [];
+    gameOver = false;
+    gameClear = false;
+    fireworks = [];
+    fireworkTicker = 0;
+    lastFoodTime = 0;
+    lastEnemyTime = 0;
+    animate();
+  }
+
+  let lastFoodTime = 0;
+  let lastEnemyTime = 0;
+
+  function spawnFood(timestamp) {
+    if (timestamp - lastFoodTime > 1500) {
+      const y = groundY - 15 - Math.random() * 60;
+      foods.push({
+        x: canvas.width + 20,
+        y: y,
+        r: 8
+      });
+      lastFoodTime = timestamp;
+    }
+  }
+
+  function spawnEnemy(timestamp) {
+    if (timestamp - lastEnemyTime > 1800) {
+      enemies.push({
+        x: canvas.width + 20,
+        y: groundY - 10,
+        w: 16,
+        h: 20,
+        speed: 3 + Math.random() * 2
+      });
+      lastEnemyTime = timestamp;
+    }
+  }
+
+  function update(dt, timestamp) {
+    if (gameOver || gameClear) return;
+
+    if (score >= 1000) {
+      gameClear = true;
+      return;
+    }
+
+    if (keys['ArrowLeft']) frog.x -= frog.speed;
+    if (keys['ArrowRight']) frog.x += frog.speed;
+    if (frog.x < 0) frog.x = 0;
+    if (frog.x + frog.w > canvas.width) frog.x = canvas.width - frog.w;
+
+    frog.vy += gravity;
+    frog.y += frog.vy;
+    if (frog.y >= groundY) {
+      frog.y = groundY;
+      frog.vy = 0;
+      frog.onGround = true;
+    }
+
+    // timer lidah
+    if (frog.tongueTimer > 0) {
+      frog.tongueTimer -= dt;
+      if (frog.tongueTimer < 0) frog.tongueTimer = 0;
+    }
+
+    spawnFood(timestamp);
+    spawnEnemy(timestamp);
+
+    foods.forEach(f => {
+      f.x -= 2.5;
+    });
+
+    foods = foods.filter(f => {
+      const closestX = Math.max(frog.x, Math.min(f.x, frog.x + frog.w));
+      const closestY = Math.max(frog.y - frog.h, Math.min(f.y, frog.y));
+      const dx = f.x - closestX;
+      const dy = f.y - closestY;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < f.r) {
+        score += 10;
+        // trigger lidah ke makanan
+        frog.tongueTimer = 200; // ms kira-kira 0.2 detik
+        frog.tongueTarget = { x: f.x, y: f.y };
+        return false;
+      }
+      return f.x + f.r > 0;
+    });
+
+    enemies.forEach(en => {
+      en.x -= en.speed;
+    });
+    enemies = enemies.filter(en => en.x + en.w > 0);
+
+    enemies.forEach(en => {
+      if (rectCollide(frog, en)) {
+        gameOver = true;
+      }
+    });
+  }
+
+  function rectCollide(a, b) {
+    return (
+      a.x < b.x + b.w &&
+      a.x + a.w > b.x &&
+      a.y - a.h < b.y + b.h &&
+      a.y > b.y
+    );
+  }
+
+  function drawGround() {
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(0, groundY + 10, canvas.width, 40);
+  }
+
+  // Katak lebih realistis + lidah
+  function drawFrog() {
+    const cx = frog.x + frog.w / 2;
+    const cy = frog.y - frog.h / 2;
+
+    // BAYANGAN DI TANAH
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.ellipse(cx, frog.y + 4, frog.w * 0.6, frog.h * 0.35, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // BADAN (oval besar)
+    ctx.fillStyle = frog.colorBody;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + 4, frog.w * 0.7, frog.h * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // PUNGGUNG (gradasi hijau gelap)
+    const grd = ctx.createLinearGradient(cx, cy - frog.h, cx, cy + frog.h);
+    grd.addColorStop(0, '#43a047');
+    grd.addColorStop(1, frog.colorDark);
+    ctx.fillStyle = grd;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, frog.w * 0.65, frog.h * 0.6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // KAKI BELAKANG KIRI
+    ctx.fillStyle = frog.colorDark;
+    ctx.beginPath();
+    ctx.moveTo(frog.x + frog.w * 0.2, frog.y - frog.h * 0.1);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.05, frog.y + frog.h * 0.3,
+                         frog.x + frog.w * 0.25, frog.y + frog.h * 0.35);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.4, frog.y + frog.h * 0.2,
+                         frog.x + frog.w * 0.35, frog.y - frog.h * 0.05);
+    ctx.closePath();
+    ctx.fill();
+
+    // KAKI BELAKANG KANAN
+    ctx.beginPath();
+    ctx.moveTo(frog.x + frog.w * 0.8, frog.y - frog.h * 0.1);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.95, frog.y + frog.h * 0.3,
+                         frog.x + frog.w * 0.75, frog.y + frog.h * 0.35);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.6, frog.y + frog.h * 0.2,
+                         frog.x + frog.w * 0.65, frog.y - frog.h * 0.05);
+    ctx.closePath();
+    ctx.fill();
+
+    // KAKI DEPAN KIRI
+    ctx.beginPath();
+    ctx.moveTo(frog.x + frog.w * 0.3, frog.y - frog.h * 0.2);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.2, frog.y + frog.h * 0.12,
+                         frog.x + frog.w * 0.32, frog.y + frog.h * 0.15);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.38, frog.y + frog.h * 0.1,
+                         frog.x + frog.w * 0.35, frog.y - frog.h * 0.15);
+    ctx.closePath();
+    ctx.fill();
+
+    // KAKI DEPAN KANAN
+    ctx.beginPath();
+    ctx.moveTo(frog.x + frog.w * 0.7, frog.y - frog.h * 0.2);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.8, frog.y + frog.h * 0.12,
+                         frog.x + frog.w * 0.68, frog.y + frog.h * 0.15);
+    ctx.quadraticCurveTo(frog.x + frog.w * 0.62, frog.y + frog.h * 0.1,
+                         frog.x + frog.w * 0.65, frog.y - frog.h * 0.15);
+    ctx.closePath();
+    ctx.fill();
+
+    // KEPALA (sedikit menonjol)
+    const headCx = cx + frog.w * 0.05;
+    const headCy = cy - frog.h * 0.5;
+    ctx.fillStyle = frog.colorBody;
+    ctx.beginPath();
+    ctx.ellipse(headCx, headCy, frog.w * 0.45, frog.h * 0.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // MATA KIRI (tonjolan)
+    const eyeOffsetX = frog.w * 0.22;
+    const eyeOffsetY = frog.h * 0.35;
+    const eyeRadius = 7;
+    ctx.fillStyle = frog.colorBody;
+    ctx.beginPath();
+    ctx.arc(headCx - eyeOffsetX, headCy - eyeOffsetY, eyeRadius + 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(headCx - eyeOffsetX, headCy - eyeOffsetY, eyeRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(headCx - eyeOffsetX + 1, headCy - eyeOffsetY, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // MATA KANAN
+    ctx.fillStyle = frog.colorBody;
+    ctx.beginPath();
+    ctx.arc(headCx + eyeOffsetX, headCy - eyeOffsetY, eyeRadius + 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(headCx + eyeOffsetX, headCy - eyeOffsetY, eyeRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#000000';
+    ctx.beginPath();
+    ctx.arc(headCx + eyeOffsetX + 1, headCy - eyeOffsetY, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // MULUT (garis senyum)
+    ctx.strokeStyle = '#1b5e20';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(headCx, headCy + frog.h * 0.05, frog.w * 0.22, 0.1 * Math.PI, 0.9 * Math.PI);
+    ctx.stroke();
+
+    // LIDAH (muncul hanya saat makan)
+    if (frog.tongueTimer > 0) {
+      const mouthX = headCx;
+      const mouthY = headCy + frog.h * 0.1;
+      const t = Math.max(0, Math.min(1, frog.tongueTimer / 200)); // 0–1
+      const tx = mouthX + (frog.tongueTarget.x - mouthX) * (1 - t * 0.2);
+      const ty = mouthY + (frog.tongueTarget.y - mouthY) * (1 - t * 0.2);
+
+      ctx.strokeStyle = '#f06292';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(mouthX, mouthY);
+      ctx.quadraticCurveTo(
+        (mouthX + tx) / 2,
+        mouthY - 10,
+        tx,
+        ty
+      );
+      ctx.stroke();
+
+      // ujung lidah
+      ctx.fillStyle = '#f48fb1';
+      ctx.beginPath();
+      ctx.arc(tx, ty, 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawFoods() {
+    foods.forEach(f => {
+      ctx.save();
+      ctx.translate(f.x, f.y);
+      ctx.fillStyle = '#6d4c41';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 5, 3, 0, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(6, 0, 3, 0, Math.PI*2);
+      ctx.fill();
+      ctx.fillStyle = '#a1887f';
+      ctx.beginPath();
+      ctx.ellipse(-1, -3, 4, 2, 0.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(-1, 3, 4, 2, -0.5, 0, Math.PI*2);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawEnemies() {
+    enemies.forEach(en => {
+      ctx.save();
+      ctx.translate(en.x, en.y - en.h);
+      ctx.fillStyle = '#0277bd';
+      ctx.beginPath();
+      ctx.moveTo(0, en.h);
+      ctx.quadraticCurveTo(en.w/2, 0, en.w, en.h);
+      ctx.quadraticCurveTo(en.w/2, en.h * 1.3, 0, en.h);
+      ctx.fill();
+      ctx.restore();
+    });
+  }
+
+  function drawHUD() {
+    ctx.fillStyle = '#004d40';
+    ctx.font = '18px Arial';
+    ctx.fillText('Skor: ' + score, 15, 25);
+
+    if (gameClear) {
+      fireworkTicker++;
+      if (fireworkTicker % 12 === 0 && fireworks.length < 7) addFirework();
+      fireworks.forEach((f,i) => {
+        f.forEach(p => {
+          ctx.save();
+          ctx.globalAlpha = p.alpha;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI*2);
+          ctx.fill();
+          ctx.restore();
+          p.x += p.vx;
+          p.y += p.vy;
+          p.alpha -= 0.016 + Math.random()*0.009;
+        });
+      });
+      fireworks = fireworks.filter(fw => fw.some(p => p.alpha > 0));
+
+      ctx.fillStyle = 'rgba(0,128,0,0.65)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '28px Arial';
+      ctx.fillText('Selamat, Katak Juara Lompatan!', 90, 80);
+      ctx.font = '18px Arial';
+      ctx.fillText('Nama: ' + playerNama, 220, 110);
+      ctx.fillText('Customer ID: ' + playerCustId, 210, 134);
+      ctx.font = '20px Arial';
+      ctx.fillText('Skor: ' + score, 260, 170);
+      ctx.fillText('Tekan ENTER untuk main lagi', 165, 210);
+    } else if (gameOver) {
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '32px Arial';
+      ctx.fillText('Katak Gagal Melompat!', 130, 140);
+      ctx.font = '20px Arial';
+      ctx.fillText('Skor: ' + score, 260, 175);
+      ctx.fillText('Tekan ENTER untuk main lagi', 165, 210);
+    }
+  }
+
+  let lastTime = 0;
+  function animate(timestamp = 0) {
+    const dt = timestamp - lastTime;
+    lastTime = timestamp;
+
+    if (bgImage.complete && bgImage.naturalWidth > 0) {
+      ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+    } else {
+      ctx.fillStyle = '#e0f7fa';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    update(dt, timestamp);
+    drawGround();
+    drawFoods();
+    drawEnemies();
+    drawFrog();
+    drawHUD();
+
+    if (!gameOver && !gameClear) {
+      requestAnimationFrame(animate);
+    }
+    if (gameClear) {
+      requestAnimationFrame(animate);
+    }
+  }
+
+  bgImage.onload = () => {};
+  bgImage.onerror = () => {};
+</script>
+</body>
+</html>
